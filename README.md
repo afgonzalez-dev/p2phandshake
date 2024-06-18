@@ -17,13 +17,17 @@ Command-line Arguments:
 
 --node-record: The node record string of the Ethereum node to connect to.
 
-''' cargo run -- --node-record "enode://7dcc9ea5437e5ef2fc681292cdb52d9f539ef11cb8404ed1b606bb4aa15199bf461f27e8cfb73d4357a97b3a33e9624b84ad04ddd9cbe136620de38b7c6b3238@86.81.28.194:30304" '''
+``` cargo run -- --node-record "enode://7dcc9ea5437e5ef2fc681292cdb52d9f539ef11cb8404ed1b606bb4aa15199bf461f27e8cfb73d4357a97b3a33e9624b84ad04ddd9cbe136620de38b7c6b3238@86.81.28.194:30304" ```
 
 # Logging (DEBUG)
 
+```
 RUST_LOG=debug cargo run -- --node-record "enode://7dcc9ea5437e5ef2fc681292cdb52d9f539ef11cb8404ed1b606bb4aa15199bf461f27e8cfb73d4357a97b3a33e9624b84ad04ddd9cbe136620de38b7c6b3238@86.81.28.194:30304"
+```
 
 # Project Structure
+
+```
 src/
 ├── config.rs      # Configuration module
 ├── errors.rs      # Custom errors module
@@ -34,6 +38,7 @@ src/
 ├── lib.rs         # Main library module
 └── tests/
     └── mod.rs     # Integration tests
+```
 
 ## License
 This project is licensed under the MIT License. See the LICENSE file for details.
