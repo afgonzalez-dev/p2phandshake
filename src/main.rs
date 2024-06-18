@@ -22,16 +22,27 @@ struct Cli {
 
 #[derive(Debug, Error)]
 enum CustomError {
-    #[error("Failed to parse node record")]
-    NodeRecordParse,
     #[error("Failed to extract address and port from node record")]
     AddressPortParse,
+    #[error("Failed to connect to the TCP stream: {0}")]
+    TcpConnect(#[from] std::io::Error),
+    #[error("Failed to create NodeRecord from string: {0}")]
+    NodeRecordCreation(#[from] reth_network_peers::NodeRecordParseError),
+    #[error("Failed to create ECIES stream")]
+    ECIESStreamCreation,
+    #[error("Failed to send message")]
+    SendMessage,
+    #[error("Failed to receive message")]
+    ReceiveMessage,
+    #[error("Failed to decode P2P message: {0}")]
+    MessageDecode(#[from] alloy_rlp::Error),
 }
 
 #[tokio::main]
 async fn main() -> Result<(), CustomError> {
     let cli = Cli::parse();
     let node_record_str = &cli.node_record;
+
     // Split the node_record_str to extract address and port
     let parts: Vec<&str> = node_record_str.split('@').collect();
     if parts.len() != 2 {
@@ -49,12 +60,14 @@ async fn main() -> Result<(), CustomError> {
         .map_err(|_| CustomError::AddressPortParse)?;
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let outgoing = TcpStream::connect((addr, port)).await.unwrap();
-    let node = NodeRecord::from_str(node_record_str).unwrap();
+    let outgoing = TcpStream::connect((addr, port))
+        .await
+        .map_err(|e| CustomError::TcpConnect(e))?;
+    let node = NodeRecord::from_str(node_record_str).map_err(CustomError::NodeRecordCreation)?;
     let mut client_stream: ECIESStream<TcpStream> =
         ECIESStream::connect(outgoing, secret_key, node.id)
             .await
-            .unwrap();
+            .map_err(|_| CustomError::ECIESStreamCreation)?;
 
     let our_peer_id = pk2id(&secret_key.public_key(SECP256K1));
     let msg = HelloMessage::builder(our_peer_id).build().into_message();
@@ -64,15 +77,19 @@ async fn main() -> Result<(), CustomError> {
     let mut hello_encoded = Vec::new();
     hello.encode(&mut hello_encoded);
 
-    client_stream.send(hello_encoded.into()).await.unwrap();
-
-    let message = tokio::time::timeout(Duration::from_millis(1000), client_stream.next())
+    client_stream
+        .send(hello_encoded.into())
         .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+        .map_err(|_| CustomError::SendMessage)?;
 
-    let resp = P2PMessage::decode(&mut &message[..]).unwrap();
+    let message_result = tokio::time::timeout(Duration::from_millis(1000), client_stream.next())
+        .await
+        .map_err(|_| CustomError::ReceiveMessage)?;
+
+    let message = message_result.ok_or(CustomError::ReceiveMessage)??;
+
+    let resp = P2PMessage::decode(&mut &message[..])?;
+
     println!("{:?}", resp);
     Ok(())
 }
