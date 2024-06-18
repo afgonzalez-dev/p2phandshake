@@ -7,8 +7,10 @@ use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{DisconnectReason, HelloMessage, P2PMessage};
 use reth_network_peers::{pk2id, NodeRecord};
 use secp256k1::{rand, SecretKey, SECP256K1};
-use thiserror::Error;
 use tokio::net::TcpStream;
+
+mod errors;
+use errors::CustomError;
 
 /// Struct for parsing command line arguments
 #[derive(Parser, Debug)]
@@ -18,24 +20,6 @@ struct Cli {
     /// NodeRecord string
     #[arg(long)]
     node_record: String,
-}
-
-#[derive(Debug, Error)]
-enum CustomError {
-    #[error("Failed to extract address and port from node record")]
-    AddressPortParse,
-    #[error("Failed to connect to the TCP stream: {0}")]
-    TcpConnect(#[from] std::io::Error),
-    #[error("Failed to create NodeRecord from string: {0}")]
-    NodeRecordCreation(#[from] reth_network_peers::NodeRecordParseError),
-    #[error("Failed to create ECIES stream")]
-    ECIESStreamCreation,
-    #[error("Failed to send message")]
-    SendMessage,
-    #[error("Failed to receive message")]
-    ReceiveMessage,
-    #[error("Failed to decode P2P message: {0}")]
-    MessageDecode(#[from] alloy_rlp::Error),
 }
 
 #[tokio::main]
