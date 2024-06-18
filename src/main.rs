@@ -22,19 +22,16 @@ struct Cli {
     node_record: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), CustomError> {
-    let cli = Cli::parse();
-    let node_record_str = &cli.node_record;
+fn parse_node_record(node_record_str: &str) -> Result<(&str, u16), CustomError> {
+    const ETH_EXPECTED_PARTS_LEN: usize = 2;
 
-    // Split the node_record_str to extract address and port
     let parts: Vec<&str> = node_record_str.split('@').collect();
-    if parts.len() != 2 {
+    if parts.len() != ETH_EXPECTED_PARTS_LEN {
         return Err(CustomError::AddressPortParse);
     }
 
     let address_port: Vec<&str> = parts[1].split(':').collect();
-    if address_port.len() != 2 {
+    if address_port.len() != ETH_EXPECTED_PARTS_LEN {
         return Err(CustomError::AddressPortParse);
     }
 
@@ -43,29 +40,58 @@ async fn main() -> Result<(), CustomError> {
         .parse()
         .map_err(|_| CustomError::AddressPortParse)?;
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    Ok((addr, port))
+}
+
+async fn create_client_stream(
+    addr: &str,
+    port: u16,
+    node_record_str: &str,
+    secret_key: &SecretKey,
+) -> Result<ECIESStream<TcpStream>, CustomError> {
     let outgoing = TcpStream::connect((addr, port))
         .await
-        .map_err(|e| CustomError::TcpConnect(e))?;
+        .map_err(CustomError::TcpConnect)?;
     let node = NodeRecord::from_str(node_record_str).map_err(CustomError::NodeRecordCreation)?;
-    let mut client_stream: ECIESStream<TcpStream> =
-        ECIESStream::connect(outgoing, secret_key, node.id)
-            .await
-            .map_err(|_| CustomError::ECIESStreamCreation)?;
+    ECIESStream::connect(outgoing, *secret_key, node.id)
+        .await
+        .map_err(|_| CustomError::ECIESStreamCreation)
+}
 
+async fn send_message(
+    client_stream: &mut ECIESStream<TcpStream>,
+    message: P2PMessage,
+) -> Result<(), CustomError> {
+    let mut encoded_msg = Vec::new();
+    message.encode(&mut encoded_msg);
+
+    client_stream
+        .send(encoded_msg.into())
+        .await
+        .map_err(|_| CustomError::SendMessage)
+}
+
+async fn send_hello_message(
+    client_stream: &mut ECIESStream<TcpStream>,
+    secret_key: &SecretKey,
+) -> Result<(), CustomError> {
     let our_peer_id = pk2id(&secret_key.public_key(SECP256K1));
     let msg = HelloMessage::builder(our_peer_id).build().into_message();
 
     let hello = P2PMessage::Hello(msg);
+    send_message(client_stream, hello).await
+}
 
-    let mut hello_encoded = Vec::new();
-    hello.encode(&mut hello_encoded);
+async fn send_disconnect_message(
+    client_stream: &mut ECIESStream<TcpStream>,
+) -> Result<(), CustomError> {
+    let disconnect = P2PMessage::Disconnect(DisconnectReason::ClientQuitting);
+    send_message(client_stream, disconnect).await
+}
 
-    client_stream
-        .send(hello_encoded.into())
-        .await
-        .map_err(|_| CustomError::SendMessage)?;
-
+async fn receive_p2p_message(
+    client_stream: &mut ECIESStream<TcpStream>,
+) -> Result<P2PMessage, CustomError> {
     let message_result = tokio::time::timeout(Duration::from_millis(1000), client_stream.next())
         .await
         .map_err(|_| CustomError::ReceiveMessage)?;
@@ -73,12 +99,23 @@ async fn main() -> Result<(), CustomError> {
     let message = message_result.ok_or(CustomError::ReceiveMessage)??;
 
     let resp = P2PMessage::decode(&mut &message[..])?;
-    println!("{:?}", resp);
+    Ok(resp)
+}
 
-    // Disconnect
-    let mut disconnect_msg = Vec::new();
-    P2PMessage::Disconnect(DisconnectReason::ClientQuitting).encode(&mut disconnect_msg);
-    client_stream.send(disconnect_msg.into()).await?;
+#[tokio::main]
+async fn main() -> Result<(), CustomError> {
+    let cli = Cli::parse();
+    let node_record_str = &cli.node_record;
+
+    let (addr, port) = parse_node_record(node_record_str)?;
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let mut client_stream = create_client_stream(addr, port, node_record_str, &secret_key).await?;
+
+    send_hello_message(&mut client_stream, &secret_key).await?;
+    let resp = receive_p2p_message(&mut client_stream).await?;
+
+    send_disconnect_message(&mut client_stream).await?;
 
     Ok(())
 }
