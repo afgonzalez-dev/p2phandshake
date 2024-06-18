@@ -4,7 +4,7 @@ use alloy_rlp::{Decodable, Encodable};
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
-use reth_eth_wire::{HelloMessage, P2PMessage};
+use reth_eth_wire::{DisconnectReason, HelloMessage, P2PMessage};
 use reth_network_peers::{pk2id, NodeRecord};
 use secp256k1::{rand, SecretKey, SECP256K1};
 use thiserror::Error;
@@ -89,7 +89,12 @@ async fn main() -> Result<(), CustomError> {
     let message = message_result.ok_or(CustomError::ReceiveMessage)??;
 
     let resp = P2PMessage::decode(&mut &message[..])?;
-
     println!("{:?}", resp);
+
+    // Disconnect
+    let mut disconnect_msg = Vec::new();
+    P2PMessage::Disconnect(DisconnectReason::ClientQuitting).encode(&mut disconnect_msg);
+    client_stream.send(disconnect_msg.into()).await?;
+
     Ok(())
 }
