@@ -8,7 +8,8 @@ This project demonstrates a P2P handshake with an Ethereum node using Rust. It c
 ## Setup
 
 ### 1. Clone the repository
-git clone <repository-url>
+git clone git@github.com:afgonzalez-dev/p2phandshake.git
+
 cd p2phandshake
 ### 2. cargo build
 
